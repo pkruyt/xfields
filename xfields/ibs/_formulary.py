@@ -11,6 +11,10 @@ import xobjects as xo
 import xtrack as xt
 from numpy.typing import ArrayLike
 
+import numpy as np
+import scipy.optimize as opt
+
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -38,8 +42,36 @@ def phi(beta: ArrayLike, alpha: ArrayLike, dx: ArrayLike, dpx: ArrayLike) -> Arr
     return dpx + alpha * dx / beta
 
 
-# ----- Some helpers on xtrack.Particles objects ----- #
+def gaussian(x, A, mu, sigma):
+    """Gaussian function used for fitting."""
+    return A * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
 
+def freedman_diaconis_bins(data):
+    """Determine optimal bin count using Freedman-Diaconis rule."""
+    if len(data) < 2:
+        return 1  # Avoid division errors
+    q25, q75 = np.percentile(data, [25, 75])
+    iqr = q75 - q25
+    bin_width = 2 * iqr * len(data) ** (-1 / 3)
+    bins = max(5, int((np.max(data) - np.min(data)) / bin_width))  # At least 5 bins
+    return bins
+
+def fit_gaussian(data):
+    """Fit Gaussian to histogram; fallback to np.std() if fit fails."""
+    
+    num_bins = freedman_diaconis_bins(data)
+    hist, bin_edges = np.histogram(data, bins=num_bins, density=True)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    A_init, mu_init, sigma_init = max(hist), np.mean(data), np.std(data, ddof=1) or 1e-5
+    p0 = [A_init, mu_init, sigma_init]
+
+    try:
+        params, _ = opt.curve_fit(gaussian, bin_centers, hist, p0=p0, maxfev=10000)
+        return float(params[2])  # Extract fitted sigma
+    except (RuntimeError, ValueError):
+        LOGGER.warning("Gaussian fit failed; using np.std() instead.")
+        return float(sigma_init)
 
 def _beam_intensity(particles: xt.Particles) -> float:
     """Get the beam intensity from the particles."""
@@ -49,41 +81,22 @@ def _beam_intensity(particles: xt.Particles) -> float:
 
 
 def _bunch_length(particles: xt.Particles) -> float:
-    """Get the bunch length from the particles."""
+    """Get the bunch length using Gaussian fitting; fallback to np.std()."""
     _assert_accepted_context(particles._context)
-    nplike = particles._context.nplike_lib
-    return float(nplike.std(particles.zeta[particles.state > 0]))
-
+    return fit_gaussian(particles.zeta[particles.state > 0])
 
 def _sigma_delta(particles: xt.Particles) -> float:
-    """
-    Get the standard deviation of the momentum spread
-    from the particles.
-    """
     _assert_accepted_context(particles._context)
-    nplike = particles._context.nplike_lib
-    return float(nplike.std(particles.delta[particles.state > 0]))
+    return fit_gaussian(particles.delta[particles.state > 0])
 
 
 def _sigma_x(particles: xt.Particles) -> float:
-    """
-    Get the horizontal coordinate standard deviation
-    from the particles.
-    """
     _assert_accepted_context(particles._context)
-    nplike = particles._context.nplike_lib
-    return float(nplike.std(particles.x[particles.state > 0]))
-
+    return fit_gaussian(particles.x[particles.state > 0])
 
 def _sigma_y(particles: xt.Particles) -> float:
-    """
-    Get the vertical coordinate standard deviation
-    from the particles.
-    """
     _assert_accepted_context(particles._context)
-    nplike = particles._context.nplike_lib
-    return float(nplike.std(particles.y[particles.state > 0]))
-
+    return fit_gaussian(particles.y[particles.state > 0])
 
 def _gemitt_x(particles: xt.Particles, betx: float, dx: float) -> float:
     """
@@ -117,59 +130,14 @@ def _current_turn(particles: xt.Particles) -> int:
 
 
 def _sigma_px(particles: xt.Particles, dpx: float = 0) -> float:
-    """
-    Get the horizontal momentum standard deviation from
-    the particles. The momentum dispersion can be provided
-    to be taken out of the calculation (as we use the stdev
-    of px, calling this function at a location with high dpx
-    would skew the result).
-
-    Parameters
-    ----------
-    particles : xt.Particles
-        The particles object.
-    dpx : float, optional
-        Horizontal momentum dispersion function at the location
-        where the sigma_px is computed. Defaults to 0.
-    
-    Returns
-    -------
-    sigma_px : float
-        The standard deviation of the horizontal momentum.
-    """
     _assert_accepted_context(particles._context)
-    nplike = particles._context.nplike_lib
-    px: ArrayLike = particles.px[particles.state > 0]
-    delta: ArrayLike = particles.delta[particles.state > 0]
-    return float(nplike.std(px - dpx * delta))
-
+    px, delta = particles.px[particles.state > 0], particles.delta[particles.state > 0]
+    return fit_gaussian(px - dpx * delta)
 
 def _sigma_py(particles: xt.Particles, dpy: float = 0) -> float:
-    """
-    Get the vertical momentum standard deviation from
-    the particles. The momentum dispersion can be provided
-    to be taken out of the calculation (as we use the stdev
-    of py, calling this function at a location with high dpy
-    would skew the result).
-
-    Parameters
-    ----------
-    particles : xt.Particles
-        The particles object.
-    dpy : float, optional
-        Vertical momentum dispersion function at the location
-        where the sigma_py is computed. Defaults to 0.
-    
-    Returns
-    -------
-    sigma_py : float
-        The standard deviation of the vertical momentum.
-    """
     _assert_accepted_context(particles._context)
-    nplike = particles._context.nplike_lib
-    py: ArrayLike = particles.py[particles.state > 0]
-    delta: ArrayLike = particles.delta[particles.state > 0]
-    return float(nplike.std(py - dpy * delta))
+    py, delta = particles.py[particles.state > 0], particles.delta[particles.state > 0]
+    return fit_gaussian(py - dpy * delta)
 
 
 def _mean_px(particles: xt.Particles, dpx: float = 0) -> float:
