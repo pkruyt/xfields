@@ -11,10 +11,6 @@ import xobjects as xo
 import xtrack as xt
 from numpy.typing import ArrayLike
 
-import numpy as np
-import scipy.optimize as opt
-
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -42,13 +38,7 @@ def phi(beta: ArrayLike, alpha: ArrayLike, dx: ArrayLike, dpx: ArrayLike) -> Arr
     return dpx + alpha * dx / beta
 
 
-def core_std_nplike(nplike, data: ArrayLike) -> float:
-    """Compute the std of the core of the beam (20th–80th percentile) using nplike."""
-    if len(data) < 2:
-        return 0.0
-    p20, p80 = nplike.percentile(data, [10, 90])
-    core = data[(data >= p20) & (data <= p80)]
-    return float(nplike.std(core, ddof=1))
+# ----- Some helpers on xtrack.Particles objects ----- #
 
 
 def _beam_intensity(particles: xt.Particles) -> float:
@@ -59,32 +49,40 @@ def _beam_intensity(particles: xt.Particles) -> float:
 
 
 def _bunch_length(particles: xt.Particles) -> float:
-    """Get the bunch length from the 20–80% core of the particles."""
+    """Get the bunch length from the particles."""
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    data = particles.zeta[particles.state > 0]
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.zeta[particles.state > 0]))
 
 
 def _sigma_delta(particles: xt.Particles) -> float:
+    """
+    Get the standard deviation of the momentum spread
+    from the particles.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    data = particles.delta[particles.state > 0]
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.delta[particles.state > 0]))
 
 
 def _sigma_x(particles: xt.Particles) -> float:
+    """
+    Get the horizontal coordinate standard deviation
+    from the particles.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    data = particles.x[particles.state > 0]
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.x[particles.state > 0]))
 
 
 def _sigma_y(particles: xt.Particles) -> float:
+    """
+    Get the vertical coordinate standard deviation
+    from the particles.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    data = particles.y[particles.state > 0]
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.y[particles.state > 0]))
 
 
 def _gemitt_x(particles: xt.Particles, betx: float, dx: float) -> float:
@@ -92,6 +90,7 @@ def _gemitt_x(particles: xt.Particles, betx: float, dx: float) -> float:
     Horizontal geometric emittance at a location in the machine,
     for the beta and dispersion functions at this location.
     """
+    # Context check is performed in the called functions
     sigma_x = _sigma_x(particles)
     sig_delta = _sigma_delta(particles)
     return float((sigma_x**2 - (dx * sig_delta) ** 2) / betx)
@@ -102,6 +101,7 @@ def _gemitt_y(particles: xt.Particles, bety: float, dy: float) -> float:
     Vertical geometric emittance at a location in the machine,
     for the beta and dispersion functions at this location.
     """
+    # Context check is performed in the called functions
     sigma_y = _sigma_y(particles)
     sig_delta = _sigma_delta(particles)
     return float((sigma_y**2 - (dy * sig_delta) ** 2) / bety)
@@ -117,30 +117,109 @@ def _current_turn(particles: xt.Particles) -> int:
 
 
 def _sigma_px(particles: xt.Particles, dpx: float = 0) -> float:
+    """
+    Get the horizontal momentum standard deviation from
+    the particles. The momentum dispersion can be provided
+    to be taken out of the calculation (as we use the stdev
+    of px, calling this function at a location with high dpx
+    would skew the result).
+
+    Parameters
+    ----------
+    particles : xt.Particles
+        The particles object.
+    dpx : float, optional
+        Horizontal momentum dispersion function at the location
+        where the sigma_px is computed. Defaults to 0.
+    
+    Returns
+    -------
+    sigma_px : float
+        The standard deviation of the horizontal momentum.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    px, delta = particles.px[particles.state > 0], particles.delta[particles.state > 0]
-    data = px - dpx * delta
-    return core_std_nplike(nplike, data)
+    px: ArrayLike = particles.px[particles.state > 0]
+    delta: ArrayLike = particles.delta[particles.state > 0]
+    return float(nplike.std(px - dpx * delta))
 
 
 def _sigma_py(particles: xt.Particles, dpy: float = 0) -> float:
+    """
+    Get the vertical momentum standard deviation from
+    the particles. The momentum dispersion can be provided
+    to be taken out of the calculation (as we use the stdev
+    of py, calling this function at a location with high dpy
+    would skew the result).
+
+    Parameters
+    ----------
+    particles : xt.Particles
+        The particles object.
+    dpy : float, optional
+        Vertical momentum dispersion function at the location
+        where the sigma_py is computed. Defaults to 0.
+    
+    Returns
+    -------
+    sigma_py : float
+        The standard deviation of the vertical momentum.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    py, delta = particles.py[particles.state > 0], particles.delta[particles.state > 0]
-    data = py - dpy * delta
-    return core_std_nplike(nplike, data)
+    py: ArrayLike = particles.py[particles.state > 0]
+    delta: ArrayLike = particles.delta[particles.state > 0]
+    return float(nplike.std(py - dpy * delta))
 
 
 def _mean_px(particles: xt.Particles, dpx: float = 0) -> float:
+    """
+    Get the arithmetic mean of the horizontal momentum from
+    the particles. The momentum dispersion can be provided to
+    be taken out of the calculation (as we use the mean of
+    px, calling this function at a location with high dpx
+    would skew the result).
+
+    Parameters
+    ----------
+    particles : xt.Particles
+        The particles object.
+    dpx : float, optional
+        Horizontal momentum dispersion function at the location
+        where the mean_px is computed. Defaults to 0.
+
+    Returns
+    -------
+    mean_px : float
+        The arithmetic mean of the horizontal momentum.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
     px: ArrayLike = particles.px[particles.state > 0]
     delta: ArrayLike = particles.delta[particles.state > 0]
     return float(nplike.mean(px - dpx * delta))
 
-
 def _mean_py(particles: xt.Particles, dpy: float = 0) -> float:
+    """
+    Get the arithmetic mean of the vertical momentum from
+    the particles. The momentum dispersion can be provided to
+    be taken out of the calculation (as we use the mean of
+    py, calling this function at a location with high dpy
+    would skew the result).
+
+    Parameters
+    ----------
+    particles : xt.Particles
+        The particles object.
+    dpy : float, optional
+        Vertical momentum dispersion function at the location
+        where the mean_py is computed. Defaults to 0.
+
+    Returns
+    -------
+    mean_py : float
+        The arithmetic mean of the horizontal momentum.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
     py: ArrayLike = particles.py[particles.state > 0]
@@ -149,6 +228,7 @@ def _mean_py(particles: xt.Particles, dpy: float = 0) -> float:
 
 
 # ----- Private helper to check the validity of the context ----- #
+
 
 def _assert_accepted_context(ctx: xo.context.XContext):
     """

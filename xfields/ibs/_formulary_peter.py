@@ -13,7 +13,8 @@ from numpy.typing import ArrayLike
 
 import numpy as np
 import scipy.optimize as opt
-
+def gaussian(x, A, mu, sigma):
+        return A * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,13 +43,7 @@ def phi(beta: ArrayLike, alpha: ArrayLike, dx: ArrayLike, dpx: ArrayLike) -> Arr
     return dpx + alpha * dx / beta
 
 
-def core_std_nplike(nplike, data: ArrayLike) -> float:
-    """Compute the std of the core of the beam (20th–80th percentile) using nplike."""
-    if len(data) < 2:
-        return 0.0
-    p20, p80 = nplike.percentile(data, [10, 90])
-    core = data[(data >= p20) & (data <= p80)]
-    return float(nplike.std(core, ddof=1))
+# ----- Some helpers on xtrack.Particles objects ----- #
 
 
 def _beam_intensity(particles: xt.Particles) -> float:
@@ -59,32 +54,72 @@ def _beam_intensity(particles: xt.Particles) -> float:
 
 
 def _bunch_length(particles: xt.Particles) -> float:
-    """Get the bunch length from the 20–80% core of the particles."""
+    """Get the bunch length from the particles."""
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    data = particles.zeta[particles.state > 0]
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.zeta[particles.state > 0]))
 
+def freedman_diaconis_bins(data):
+    q25, q75 = np.percentile(data, [25, 75])
+    iqr = q75 - q25
+    bin_width = 2 * iqr * len(data) ** (-1 / 3)
+    bins = int((np.max(data) - np.min(data)) / bin_width)
+    return max(1, bins)  # Ensure at least 1 bin
+
+# def _sigma_delta(particles: xt.Particles) -> float:
+#     """
+#     Get the standard deviation of the momentum spread
+#     from the particles.
+#     """
+#     _assert_accepted_context(particles._context)
+#     nplike = particles._context.nplike_lib
+#     data=particles.delta[particles.state > 0]
+#     num_bins = freedman_diaconis_bins(data)  
+#     bins=num_bins
+#     #bins = int(np.sqrt(len(data)))  
+#     #bins=10  
+#     hist, bin_edges = np.histogram(data, bins=bins, density=True)
+#     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2  
+    
+#     A_init = max(hist)  
+#     mu_init = np.mean(data)  
+#     sigma_init = np.std(data)  
+
+#     p0 = [A_init, mu_init, sigma_init]
+
+#     params, covariance = opt.curve_fit(gaussian, bin_centers, hist, p0=p0,maxfev=10000)
+#     A_fit, mu_fit, sigma_fit = params
+    
+#     return float(sigma_fit)
 
 def _sigma_delta(particles: xt.Particles) -> float:
+    """
+    Get the standard deviation of the momentum spread
+    from the particles.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    data = particles.delta[particles.state > 0]
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.delta[particles.state > 0]))
 
 
 def _sigma_x(particles: xt.Particles) -> float:
+    """
+    Get the horizontal coordinate standard deviation
+    from the particles.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    data = particles.x[particles.state > 0]
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.x[particles.state > 0]))
 
 
 def _sigma_y(particles: xt.Particles) -> float:
+    """
+    Get the vertical coordinate standard deviation
+    from the particles.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    data = particles.y[particles.state > 0]
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.y[particles.state > 0]))
 
 
 def _gemitt_x(particles: xt.Particles, betx: float, dx: float) -> float:
@@ -92,6 +127,7 @@ def _gemitt_x(particles: xt.Particles, betx: float, dx: float) -> float:
     Horizontal geometric emittance at a location in the machine,
     for the beta and dispersion functions at this location.
     """
+    # Context check is performed in the called functions
     sigma_x = _sigma_x(particles)
     sig_delta = _sigma_delta(particles)
     return float((sigma_x**2 - (dx * sig_delta) ** 2) / betx)
@@ -102,6 +138,7 @@ def _gemitt_y(particles: xt.Particles, bety: float, dy: float) -> float:
     Vertical geometric emittance at a location in the machine,
     for the beta and dispersion functions at this location.
     """
+    # Context check is performed in the called functions
     sigma_y = _sigma_y(particles)
     sig_delta = _sigma_delta(particles)
     return float((sigma_y**2 - (dy * sig_delta) ** 2) / bety)
@@ -116,39 +153,28 @@ def _current_turn(particles: xt.Particles) -> int:
     return int(particles.at_turn[particles.state > 0][0])
 
 
-def _sigma_px(particles: xt.Particles, dpx: float = 0) -> float:
+def _sigma_px(particles: xt.Particles) -> float:
+    """
+    Get the horizontal momentum standard deviation
+    from the particles.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    px, delta = particles.px[particles.state > 0], particles.delta[particles.state > 0]
-    data = px - dpx * delta
-    return core_std_nplike(nplike, data)
+    return float(nplike.std(particles.px[particles.state > 0]))
 
 
-def _sigma_py(particles: xt.Particles, dpy: float = 0) -> float:
+def _sigma_py(particles: xt.Particles) -> float:
+    """
+    Get the vertical momentum standard deviation
+    from the particles.
+    """
     _assert_accepted_context(particles._context)
     nplike = particles._context.nplike_lib
-    py, delta = particles.py[particles.state > 0], particles.delta[particles.state > 0]
-    data = py - dpy * delta
-    return core_std_nplike(nplike, data)
-
-
-def _mean_px(particles: xt.Particles, dpx: float = 0) -> float:
-    _assert_accepted_context(particles._context)
-    nplike = particles._context.nplike_lib
-    px: ArrayLike = particles.px[particles.state > 0]
-    delta: ArrayLike = particles.delta[particles.state > 0]
-    return float(nplike.mean(px - dpx * delta))
-
-
-def _mean_py(particles: xt.Particles, dpy: float = 0) -> float:
-    _assert_accepted_context(particles._context)
-    nplike = particles._context.nplike_lib
-    py: ArrayLike = particles.py[particles.state > 0]
-    delta: ArrayLike = particles.delta[particles.state > 0]
-    return float(nplike.mean(py - dpy * delta))
+    return float(nplike.std(particles.py[particles.state > 0]))
 
 
 # ----- Private helper to check the validity of the context ----- #
+
 
 def _assert_accepted_context(ctx: xo.context.XContext):
     """
