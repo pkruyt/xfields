@@ -46,7 +46,7 @@ def core_std_nplike(nplike, data: ArrayLike) -> float:
     """Compute the std of the core of the beam (20th–80th percentile) using nplike."""
     if len(data) < 2:
         return 0.0
-    p20, p80 = nplike.percentile(data, [20, 80])
+    p20, p80 = nplike.percentile(data, [10, 90])
     core = data[(data >= p20) & (data <= p80)]
     return float(nplike.std(core, ddof=1))
 
