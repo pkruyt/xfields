@@ -60,9 +60,9 @@ def fit_gaussian(data):
     """Fit Gaussian to histogram with 20–80 percentile filtering; fallback to np.std() if fit fails."""
     
     # Filter to 20th–80th percentile range
-    p20, p80 = np.percentile(data, [20, 80])
-    filtered_data = data[(data >= p20) & (data <= p80)]
-
+    # p20, p80 = np.percentile(data, [20, 80])
+    #filtered_data = data[(data >= p20) & (data <= p80)]
+    filtered_data=data
     num_bins = freedman_diaconis_bins(filtered_data)
     hist, bin_edges = np.histogram(filtered_data, bins=num_bins, density=True)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
