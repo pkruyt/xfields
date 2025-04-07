@@ -48,7 +48,7 @@ def core_std_nplike(nplike, data: ArrayLike) -> float:
         return 0.0
     p20, p80 = nplike.percentile(data, [20, 80])
     core = data[(data >= p20) & (data <= p80)]
-    return float(nplike.std(core, ddof=1))
+    return float(nplike.std(core))
 
 
 def _beam_intensity(particles: xt.Particles) -> float:
